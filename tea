@@ -1,4 +1,4 @@
-#!/usr/local/bin/bash
+#!/usr/bin/env bash
 
 : "${FZ:=fzy}"
 : "${DB:="${XDG_DATA_HOME:-$HOME/.local/share}/tea.db"}"
@@ -37,7 +37,7 @@ function new_tea {
 
     sqlite3 "$DB" << SQL
 	insert into teas (name, year, amount, type, url)
-	values ($name, $year, $amount, $typ, $url)
+	values ($name, $year, $amount, $typ, $url);
 SQL
     
 }
@@ -50,14 +50,14 @@ function _drink_tea {
 	echo "$0: Couldn't create tempfile"
 	sqlite3 "$DB" << SQL
 	    insert into log (tea, amount, date, notes)
-	    values ('$(escape_sqlite "$tea")', $(escape_or_null "$amount"), now(), NULL)
+	    values ('$(escape_sqlite "$tea")', $(escape_or_null "$amount"), now(), NULL);
 SQL
     else
 	$EDITOR "$tmpfile"
 	notes="$(cat "$tmpfile")"
 	sqlite3 "$DB" << SQL
 	    insert into log (tea, amount, date, notes)
-	    values ('$(escape_sqlite "$tea")', $(escape_or_null "$amount"), date('now'), '$(escape_sqlite "$notes")')
+	    values ('$(escape_sqlite "$tea")', $(escape_or_null "$amount"), date('now'), '$(escape_sqlite "$notes")');
 SQL
     fi
 }
