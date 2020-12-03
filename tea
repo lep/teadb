@@ -47,17 +47,17 @@ function _drink_tea {
     read -r -p "Amount: " amount
     
     if tmpfile=$(mktemp -q /tmp/teanotes.XXXXX); then
-	echo "$0: Couldn't create tempfile"
-	sqlite3 "$DB" << SQL
-	    insert into log (tea, amount, date, notes)
-	    values ('$(escape_sqlite "$tea")', $(escape_or_null "$amount"), now(), NULL);
-SQL
-    else
 	$EDITOR "$tmpfile"
 	notes="$(cat "$tmpfile")"
 	sqlite3 "$DB" << SQL
 	    insert into log (tea, amount, date, notes)
 	    values ('$(escape_sqlite "$tea")', $(escape_or_null "$amount"), date('now'), '$(escape_sqlite "$notes")');
+SQL
+    else
+	echo "$0: Couldn't create tempfile"
+	sqlite3 "$DB" << SQL
+	    insert into log (tea, amount, date, notes)
+	    values ('$(escape_sqlite "$tea")', $(escape_or_null "$amount"), date('now'), NULL);
 SQL
     fi
 }
