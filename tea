@@ -1,8 +1,7 @@
 #!/usr/local/bin/bash
 
-FZ=fzy
-
-db="${XDG_DATA_HOME:-$HOME/.local/share}/tea.db"
+: "${FZ:=fzy}"
+: "${DB:="${XDG_DATA_HOME:-$HOME/.local/share}/tea.db"}"
 
 function die {
     echo "$@"
@@ -14,7 +13,7 @@ function escape_sqlite {
 }
 
 function escape_or_null {
-    if [ -n ${1+x} ]; then
+    if [ -n "$1" ]; then
 	echo "'$(escape_sqlite "$1")'"
     else
 	echo NULL
@@ -28,50 +27,56 @@ function new_tea {
     read -r -p "Type: " typ
     read -r -e -i "$(date +%Y)" -p "Year: " year
 
-    [ -z ${name+x} ] && die "Please supply a name"
+    [ -z "$name" ] && die "Please supply a name"
     name="'$(escape_sqlite "$name")'"
 
-    amount="$(escape_or_null $amount)"
-    url="$(escape_or_null $url)"
-    typ="$(escape_or_null $typ)"
-    year="$(escape_or_null $year)"
+    amount="$(escape_or_null "$amount")"
+    url="$(escape_or_null "$url")"
+    typ="$(escape_or_null "$typ")"
+    year="$(escape_or_null "$year")"
 
-    sqlite3 "$db" << SQL
+    sqlite3 "$DB" << SQL
 	insert into teas (name, year, amount, type, url)
 	values ($name, $year, $amount, $typ, $url)
 SQL
     
 }
 
-function drink_tea {
-    tea=$(sqlite3 "$db" "select name from teas" | $FZ)
-    [ -z ${tea+x} ] && exit
+function _drink_tea {
+    tea=$1
     read -r -p "Amount: " amount
-    tmpfile=$(mktemp -q /tmp/teanotes.XXXXX)
-    if [ $? -ne 0 ]; then
+    
+    if tmpfile=$(mktemp -q /tmp/teanotes.XXXXX); then
 	echo "$0: Couldn't create tempfile"
-	sqlite3 "$db" << SQL
+	sqlite3 "$DB" << SQL
 	    insert into log (tea, amount, date, notes)
-	    values ('$(escape_sqlite "$tea")', $(escape_or_null $amount), now(), NULL)
+	    values ('$(escape_sqlite "$tea")', $(escape_or_null "$amount"), now(), NULL)
 SQL
     else
 	$EDITOR "$tmpfile"
 	notes="$(cat "$tmpfile")"
-	sqlite3 "$db" << SQL
+	sqlite3 "$DB" << SQL
 	    insert into log (tea, amount, date, notes)
-	    values ('$(escape_sqlite "$tea")', $(escape_or_null $amount), date('now'), '$(escape_sqlite "$notes")')
+	    values ('$(escape_sqlite "$tea")', $(escape_or_null "$amount"), date('now'), '$(escape_sqlite "$notes")')
 SQL
     fi
 }
 
+function drink_tea_fzy {
+    tea="$(list_teas)"
+    [ -z "$tea" ] && exit 0
+    _drink_tea "$tea"
+
+}
+
 function list_teas {
-    sqlite3 "$db" "select name from teas" | $FZ
+    sqlite3 "$DB" "select name from teas" | $FZ
 }
 
 
 
 
-[ -f "$db" ] || sqlite3 "$db" << SQL
+[ -f "$DB" ] || sqlite3 "$DB" << SQL
     create table teas (
 	name,
 	amount,
@@ -97,6 +102,6 @@ case "$1" in
 	list_teas
     ;;
     *)
-	drink_tea
+	drink_tea_fzy
     ;;
 esac
