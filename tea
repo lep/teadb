@@ -1,0 +1,102 @@
+#!/usr/local/bin/bash
+
+FZ=fzy
+
+db="${XDG_DATA_HOME:-$HOME/.local/share}/tea.db"
+
+function die {
+    echo "$@"
+    exit 1
+}
+
+function escape_sqlite {
+    sed "s/'/''/g" <<< "$1"
+}
+
+function escape_or_null {
+    if [ -n ${1+x} ]; then
+	echo "'$(escape_sqlite "$1")'"
+    else
+	echo NULL
+    fi
+}
+
+function new_tea {
+    read -r -p "Name: " name
+    read -r -p "Amount: " amount
+    read -r -p "URL: " url
+    read -r -p "Type: " typ
+    read -r -e -i "$(date +%Y)" -p "Year: " year
+
+    [ -z ${name+x} ] && die "Please supply a name"
+    name="'$(escape_sqlite "$name")'"
+
+    amount="$(escape_or_null $amount)"
+    url="$(escape_or_null $url)"
+    typ="$(escape_or_null $typ)"
+    year="$(escape_or_null $year)"
+
+    sqlite3 "$db" << SQL
+	insert into teas (name, year, amount, type, url)
+	values ($name, $year, $amount, $typ, $url)
+SQL
+    
+}
+
+function drink_tea {
+    tea=$(sqlite3 "$db" "select name from teas" | $FZ)
+    [ -z ${tea+x} ] && exit
+    read -r -p "Amount: " amount
+    tmpfile=$(mktemp -q /tmp/teanotes.XXXXX)
+    if [ $? -ne 0 ]; then
+	echo "$0: Couldn't create tempfile"
+	sqlite3 "$db" << SQL
+	    insert into log (tea, amount, date, notes)
+	    values ('$(escape_sqlite "$tea")', $(escape_or_null $amount), now(), NULL)
+SQL
+    else
+	$EDITOR "$tmpfile"
+	notes="$(cat "$tmpfile")"
+	sqlite3 "$db" << SQL
+	    insert into log (tea, amount, date, notes)
+	    values ('$(escape_sqlite "$tea")', $(escape_or_null $amount), date('now'), '$(escape_sqlite "$notes")')
+SQL
+    fi
+}
+
+function list_teas {
+    sqlite3 "$db" "select name from teas" | $FZ
+}
+
+
+
+
+[ -f "$db" ] || sqlite3 "$db" << SQL
+    create table teas (
+	name,
+	amount,
+	url,
+	type,
+	year
+    );
+
+    create table log (
+	tea,
+	amount,
+	date,
+	notes
+    );
+SQL
+
+
+case "$1" in
+    new)
+	new_tea
+    ;;
+    list)
+	list_teas
+    ;;
+    *)
+	drink_tea
+    ;;
+esac
