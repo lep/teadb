@@ -14,9 +14,9 @@ function escape_sqlite {
 
 function escape_or_null {
     if [ -n "$1" ]; then
-	echo "'$(escape_sqlite "$1")'"
+    echo "'$(escape_sqlite "$1")'"
     else
-	echo NULL
+    echo NULL
     fi
 }
 
@@ -34,31 +34,37 @@ function new_tea {
     url="$(escape_or_null "$url")"
     typ="$(escape_or_null "$typ")"
     year="$(escape_or_null "$year")"
+    uid="$(uuidgen)"
 
     sqlite3 "$DB" << SQL
-	insert into teas (name, year, amount, type, url)
-	values ($name, $year, $amount, $typ, $url);
+    insert into teas (name, year, amount, type, url, uid)
+    values ($name, $year, $amount, $typ, $url, '$uid');
 SQL
     
 }
 
 function _drink_tea {
     tea=$1
+    uid="$(uuidgen)"
     read -r -p "Amount: " amount
+
+    echo "New entry: $uid"
+
+    sqlite3 "$DB" << SQL
+        insert into log (tea, amount, date, notes, uid)
+        values ('$(escape_sqlite "$tea")', $(escape_or_null "$amount"), date('now'), NULL, '$uid');
+SQL
     
     if tmpfile=$(mktemp -q /tmp/teanotes.XXXXX); then
-	$EDITOR "$tmpfile"
-	notes="$(cat "$tmpfile")"
-	sqlite3 "$DB" << SQL
-	    insert into log (tea, amount, date, notes)
-	    values ('$(escape_sqlite "$tea")', $(escape_or_null "$amount"), date('now'), '$(escape_sqlite "$notes")');
+        [ -z "$EDITOR" ] && die "NO \$EDITOR set."
+        $EDITOR "$tmpfile"
+        notes="$(cat "$tmpfile")"
+        sqlite3 "$DB" << SQL
+            update log set notes = '$(escape_sqlite "$notes")' where uid = '$uid';
 SQL
+
     else
-	echo "$0: Couldn't create tempfile"
-	sqlite3 "$DB" << SQL
-	    insert into log (tea, amount, date, notes)
-	    values ('$(escape_sqlite "$tea")', $(escape_or_null "$amount"), date('now'), NULL);
-SQL
+        die "$0: Couldn't create tempfile"
     fi
 }
 
@@ -78,30 +84,32 @@ function list_teas {
 
 [ -f "$DB" ] || sqlite3 "$DB" << SQL
     create table teas (
-	name,
-	amount,
-	url,
-	type,
-	year
+    name,
+    amount,
+    url,
+    type,
+    year,
+    uid
     );
 
     create table log (
-	tea,
-	amount,
-	date,
-	notes
+    tea,
+    amount,
+    date,
+    notes,
+    uid
     );
 SQL
 
 
 case "$1" in
     new)
-	new_tea
+    new_tea
     ;;
     list)
-	list_teas
+    list_teas
     ;;
     *)
-	drink_tea_fzy
+    drink_tea_fzy
     ;;
 esac
