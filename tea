@@ -79,8 +79,32 @@ function list_teas {
     sqlite3 "$DB" "select name from teas" | $FZ
 }
 
+function edit_notes {
+    uid="$1"
+    if [ -z "$uid" ]; then
+        echo "No uid given; using latest entry"
+        uid="$(sqlite3 "$DB" 'select uid from log order by date desc limit 1')"
+    else
+        uid="$(sqlite3 "$DB" "select uid from log where uid like '$(escape_sqlite "$uid")%'")"
+        [ -z "$uid" ] && die "Couldn't find a log entry with that uid."
+    fi
+    
+    if tmpfile=$(mktemp -q /tmp/teanotes.XXXXX); then
+        [ -z "$EDITOR" ] && die "NO \$EDITOR set."
+        sqlite3 "$DB" "select notes from log where uid = '$(escape_sqlite "$uid")'" > $tmpfile
+        $EDITOR "$tmpfile"
+        notes="$(cat "$tmpfile")"
+        sqlite3 "$DB" << SQL
+            update log set notes = '$(escape_sqlite "$notes")' where uid = '$uid';
+SQL
+    else
+        die "$0: Couldn't create tempfile"
+    fi
+}
 
-
+function quick_log {
+    sqlite3 "$DB" "select tea, date, uid from log order by date desc limit 10"
+}
 
 [ -f "$DB" ] || sqlite3 "$DB" << SQL
     create table teas (
@@ -108,6 +132,12 @@ case "$1" in
     ;;
     list)
     list_teas
+    ;;
+    edit)
+    edit_notes "$2"
+    ;;
+    lg)
+    quick_log
     ;;
     *)
     drink_tea_fzy
