@@ -8,13 +8,7 @@
 
 void emit_drinking_log(sqlite3 *db, int limit){
     sqlite3_stmt *stmt;
-
-    int r = sqlite3_prepare_v2(db, "select tea, date from log order by date desc limit 10", -1, &stmt, NULL);
-
-    if( r != SQLITE_OK ){
-	fprintf(stderr, "Error emit_drinking_log (%d)\n", r);
-	exit(1);
-    }
+    sqlite3_prepare_v2(db, "select tea, date from log order by date desc limit 10", -1, &stmt, NULL);
 
     xo_open_list("log");
     while( sqlite3_step(stmt) != SQLITE_DONE){
