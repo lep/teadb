@@ -20,6 +20,14 @@ function escape_or_null {
     fi
 }
 
+function _try_create_tempfile {
+    if tmpfile=$(mktemp -q /tmp/teanotes.XXXXX); then
+        echo "$tmpfile"
+    else
+        exit 1
+    fi
+}
+
 function new_tea {
     read -r -p "Name: " name
     read -r -p "Amount: " amount
@@ -55,24 +63,21 @@ function _drink_tea {
         values ('$(escape_sqlite "$tea")', $(escape_or_null "$amount"), date('now'), NULL, '$uid');
 SQL
     
-    if tmpfile=$(mktemp -q /tmp/teanotes.XXXXX); then
-        [ -z "$EDITOR" ] && die "NO \$EDITOR set."
-        $EDITOR "$tmpfile"
-        notes="$(cat "$tmpfile")"
-        sqlite3 "$DB" << SQL
-            update log set notes = '$(escape_sqlite "$notes")' where uid = '$uid';
+    [ -z "$EDITOR" ] && die "NO \$EDITOR set."
+    tmpfile=$(_try_create_tempfile) || die "$0: Couldn't create tempfile"
+    
+    $EDITOR "$tmpfile"
+    notes="$(cat "$tmpfile")"
+    sqlite3 "$DB" << SQL
+        update log set notes = '$(escape_sqlite "$notes")' where uid = '$uid';
 SQL
 
-    else
-        die "$0: Couldn't create tempfile"
-    fi
 }
 
 function drink_tea_fzy {
     tea="$(list_teas)"
     [ -z "$tea" ] && exit 0
     _drink_tea "$tea"
-
 }
 
 function list_teas {
@@ -81,6 +86,7 @@ function list_teas {
 
 function edit_notes {
     uid="$1"
+    [ -z "$EDITOR" ] && die "NO \$EDITOR set."
     if [ -z "$uid" ]; then
         echo "No uid given; using latest entry"
         uid="$(sqlite3 "$DB" 'select uid from log order by date desc limit 1')"
