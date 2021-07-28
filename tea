@@ -14,9 +14,9 @@ function escape_sqlite {
 
 function escape_or_null {
     if [ -n "$1" ]; then
-    echo "'$(escape_sqlite "$1")'"
+        echo "'$(escape_sqlite "$1")'"
     else
-    echo NULL
+        echo NULL
     fi
 }
 
@@ -45,8 +45,8 @@ function new_tea {
     uid="$(uuidgen)"
 
     sqlite3 "$DB" << SQL
-    insert into teas (name, year, amount, type, url, uid)
-    values ($name, $year, $amount, $typ, $url, '$uid');
+insert into teas (name, year, amount, type, url, uid)
+values ($name, $year, $amount, $typ, $url, '$uid');
 SQL
     
 }
@@ -59,8 +59,8 @@ function _drink_tea {
     echo "New entry: $uid"
 
     sqlite3 "$DB" << SQL
-        insert into log (tea, amount, date, notes, uid)
-        values ('$(escape_sqlite "$tea")', $(escape_or_null "$amount"), date('now'), NULL, '$uid');
+insert into log (tea, amount, date, notes, uid)
+values ('$(escape_sqlite "$tea")', $(escape_or_null "$amount"), date('now'), NULL, '$uid');
 SQL
     
     [ -z "$EDITOR" ] && die "NO \$EDITOR set."
@@ -69,7 +69,9 @@ SQL
     $EDITOR "$tmpfile"
     notes="$(cat "$tmpfile")"
     sqlite3 "$DB" << SQL
-        update log set notes = '$(escape_sqlite "$notes")' where uid = '$uid';
+update log
+set notes = '$(escape_sqlite "$notes")'
+where uid = '$uid';
 SQL
 
 }
@@ -101,7 +103,9 @@ function edit_notes {
     $EDITOR "$tmpfile"
     notes="$(cat "$tmpfile")"
     sqlite3 "$DB" << SQL
-        update log set notes = '$(escape_sqlite "$notes")' where uid = '$uid';
+update log
+set notes = '$(escape_sqlite "$notes")'
+where uid = '$uid';
 SQL
 
 }
@@ -116,51 +120,111 @@ function info_tea {
 	[ -z "$tea" ] && exit 0
 	total="$(sqlite3 "$DB" "select sum(amount) from teas where name = '$tea'")"
 	drank="$(sqlite3 "$DB" "select sum(amount) from log where tea = '$tea'")"
+
     if [ -z "$drank" ]; then
         echo "Of ${total}g bought you drank nothing."
     else
         left="$(echo - | awk "{print $total - $drank}")"
         echo "Of ${total}g bought you drank ${drank}g. ${left}g left."
+
+        avg_session_amnt="$(sqlite3 "$DB" "select round(avg(amount), 2) from log where tea = '$tea'")"
+        echo "You use an average of ${avg_session_amnt}g per session."
+        echo "Last few sessions:"
+        sqlite3 "$DB" "select uid, date from log where tea = '$tea' order by date desc limit 10" \
+            | tac \
+            | while IFS='|' read -r uid date; do
+                echo "$uid on $date"
+            done
     fi
 }
 
-[ -f "$DB" ] || sqlite3 "$DB" << SQL
-    create table teas (
+function info_global {
+    r=$(sqlite3 "$DB" << SQL 
+select
+    type_bought.type
+  , round(type_bought.amnt, 2)
+  , round(type_drank.amnt, 2)
+  , round(type_bought.amnt - type_drank.amnt, 2)
+from
+(
+    select
+          type
+        , sum(amount) as amnt
+    from teas
+    group by type
+) as type_bought
+join
+(
+    select
+        sum(amount) as amnt
+      , type from
+        -- since the log joins onto tea name and not tea uid
+        -- we have to distinct/indirect this query to not double count
+        -- log entries where the tea was bought twice or more
+    (
+        select distinct
+            name
+          , log.amount
+          , type
+          , log.uid
+          from teas
+          join log on teas.name = log.tea
+    ) group by type
+) as type_drank
+on type_bought.type = type_drank.type
+order by 2 desc;
+SQL
+)
+
+    while IFS='|' read -r ty amount_bought amount_drunk amount_left; do
+        echo "Of ${amount_bought}g of $ty tea you drank ${amount_drunk}g. ${amount_left}g left."
+    done <<< "$r"
+}
+
+function main {
+    [ -f "$DB" ] || sqlite3 "$DB" << SQL
+create table teas (
     name,
     amount,
     url,
     type,
     year,
     uid
-    );
+);
 
-    create table log (
+create table log (
     tea,
     amount,
     date,
     notes,
     uid
-    );
+);
 SQL
 
 
-case "$1" in
-    new)
-    new_tea
-    ;;
-    list)
-    list_teas
-    ;;
-    edit)
-    edit_notes "$2"
-    ;;
-    lg)
-    quick_log
-    ;;
-    info)
-    info_tea
-    ;;
-    *)
-    drink_tea_fzy
-    ;;
-esac
+    case "$1" in
+        new)
+            new_tea
+        ;;
+        list)
+            list_teas
+        ;;
+        edit)
+            edit_notes "$2"
+        ;;
+        lg)
+            quick_log
+        ;;
+        info)
+            info_tea
+        ;;
+        overview)
+            info_global
+        ;;
+        *)
+            drink_tea_fzy
+        ;;
+    esac
+}
+
+main $@
