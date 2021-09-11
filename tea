@@ -111,7 +111,7 @@ SQL
 }
 
 function quick_log {
-    sqlite3 "$DB" "select tea, date, uid from log order by date desc limit 10"
+    sqlite3 "$DB" "select tea, amount, date, uid from log order by date desc limit 10"
 }
 
 function info_tea {
@@ -130,10 +130,10 @@ function info_tea {
         avg_session_amnt="$(sqlite3 "$DB" "select round(avg(amount), 2) from log where tea = '$tea'")"
         echo "You use an average of ${avg_session_amnt}g per session."
         echo "Last few sessions:"
-        sqlite3 "$DB" "select uid, date from log where tea = '$tea' order by date desc limit 10" \
+        sqlite3 "$DB" "select uid, date, amount from log where tea = '$tea' order by date desc limit 10" \
             | tac \
-            | while IFS='|' read -r uid date; do
-                echo "$uid on $date"
+            | while IFS='|' read -r uid date amount; do
+                echo "$amount on $date - $uid"
             done
     fi
 }
