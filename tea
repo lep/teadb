@@ -361,9 +361,9 @@ function _server_sync_accept_missing {
 
 function sync {
     $0 _client_sync_send_ids \
-    | ssh "$1" "tea _server_sync_send_missing" \
+    | ssh "$1" 'exec $SHELL -l -c "tea _server_sync_send_missing"' \
     | $0 _client_sync_send_missing \
-    | ssh "$1" "tea _server_sync_accept_missing"
+    | ssh "$1" 'exec $SHELL -l -c "tea _server_sync_accept_missing"'
 }
 
 function main {
