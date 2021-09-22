@@ -99,7 +99,7 @@ function edit_notes {
     
     tmpfile=$(_try_create_tempfile) || die "$0: Couldn't create tempfile"
     
-    sqlite3 "$DB" "select notes from log where uid = '$(escape_sqlite "$uid")'" > $tmpfile
+    sqlite3 "$DB" "select notes from log where uid = '$(escape_sqlite "$uid")'" > "$tmpfile"
     $EDITOR "$tmpfile"
     notes="$(cat "$tmpfile")"
     sqlite3 "$DB" << SQL
@@ -181,6 +181,191 @@ SQL
     done <<< "$r"
 }
 
+
+function _client_sync_send_ids {
+    echo remote-have-tea
+    sqlite3 -readonly -quote "$DB" 'select uid from teas'
+    echo remote-have-log
+    sqlite3 -readonly -quote "$DB" 'select uid from log'
+    echo "done"
+}
+
+function _client_sync_send_missing {
+    local state=""
+    local tea_ids=""
+    local log_ids=""
+    local sql=""
+
+    while read -r line; do
+	case "$line" in
+	    server-want-tea)
+		state="server-want-tea"
+	    ;;
+	    server-want-log)
+		state="server-want-log"
+	    ;;
+	    server-begin-sql)
+		state="server-begin-sql"
+	    ;;
+	    done)
+		break
+	    ;;
+	    *)
+		case "$state" in
+		    server-want-tea)
+			if [ -z "$tea_ids" ]; then
+			    tea_ids="$line"
+			else
+			    tea_ids="$line,$tea_ids"
+			fi
+		    ;;
+
+		    server-want-log)
+			if [ -z "$log_ids" ]; then
+			    log_ids="$line"
+			else
+			    log_ids="$line,$log_ids"
+			fi
+		    ;;
+		    server-begin-sql)
+			sql="$sql;$line"
+		    ;;
+		esac
+	    ;;
+	esac
+    done
+
+    echo client-begin-sql
+    sqlite3 -readonly "$DB" <<SQL
+.mode insert teas
+select * from teas where uid in ($tea_ids);
+.mode insert log
+select * from log where uid in ($log_ids);
+SQL
+    echo "done"
+    
+    if [ ! -z "$sql" ]; then
+	sql="BEGIN TRANSACTION; $sql; END TRANSACTION;"
+	sqlite3 "$DB" "$sql"
+    fi
+
+}
+
+function _server_sync_send_missing {
+    local tea_ids=""
+    local log_ids=""
+    local state=""
+
+    while read -r line; do
+	case "$line" in
+	    remote-have-tea)
+		state="remote-have-tea"
+	    ;;
+	    remote-have-log)
+		state="remote-have-log"
+	    ;;
+	    done)
+		break
+	    ;;
+	    *)
+		case "$state" in
+		    remote-have-tea)
+			if [ -z "$tea_ids" ]; then
+			    tea_ids="($line)"
+			else
+			    tea_ids="$tea_ids,($line)"
+			fi
+		    ;;
+		    remote-have-log)
+			if [ -z "$log_ids" ]; then
+			    log_ids="($line)"
+			else
+			    log_ids="$log_ids,($line)"
+			fi
+		    ;;
+		esac
+	    ;;
+	esac
+    done
+
+    if [ ! -z "$tea_ids" ]; then
+	echo server-begin-sql
+	sqlite3 -readonly "$DB" <<SQL
+.mode insert teas
+select *
+from teas
+where uid in (
+    select uid
+    from teas
+    except values $tea_ids
+);
+SQL
+
+	echo server-want-tea
+	sqlite3 -readonly -quote "$DB" <<SQL
+	    select uid from (
+		select 0 as uid
+		union values $tea_ids
+	    )
+	    except select uid
+	    from teas
+	    limit -1
+	    offset 1 -- to drop the 0 uid
+SQL
+    fi
+
+
+    if [ ! -z "$log_ids" ]; then
+	echo server-want-log
+	sqlite3 -readonly -quote "$DB" <<SQL
+	    select uid from (
+		select 0 as uid
+		union values $log_ids
+	    )
+	    except select uid
+	    from log
+	    limit -1
+	    offset 1 -- to drop the 0 uid
+SQL
+    fi
+    echo "done"
+}
+
+function _server_sync_accept_missing {
+    local state=""
+    local sql=""
+
+    while read -r line; do
+	case "$line" in
+	    client-begin-sql)
+		state="client-begin-sql"
+	    ;;
+	    done)
+		break
+	    ;;
+	    *)
+		case "$state" in
+		    client-begin-sql)
+			sql="$sql;$line"
+		    ;;
+		esac
+	    ;;
+	esac
+    done
+
+    if [ ! -z "$sql" ]; then
+	sql="BEGIN TRANSACTION; $sql; END TRANSACTION;"
+	sqlite3 "$DB" "$sql"
+    fi
+}
+
+function sync {
+    $0 _client_sync_send_ids \
+    | ssh "$1" "tea _server_sync_send_missing" \
+    | $0 _client_sync_send_missing \
+    | ssh "$1" "tea _server_sync_accept_missing"
+}
+
 function main {
     [ -f "$DB" ] || sqlite3 "$DB" << SQL
 create table teas (
@@ -221,6 +406,27 @@ SQL
         overview)
             info_global
         ;;
+
+	sync)
+	    sync "$2"
+	;;
+
+	_client_sync_send_ids)
+	    _client_sync_send_ids
+	;;
+
+	_server_sync_send_missing)
+	    _server_sync_send_missing
+	;;
+
+	_client_sync_send_missing)
+	    _client_sync_send_missing
+	;;
+
+	_server_sync_accept_missing)
+	    _server_sync_accept_missing
+	;;
+
         *)
             drink_tea_fzy
         ;;
