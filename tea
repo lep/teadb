@@ -42,7 +42,7 @@ function new_tea {
     url="$(escape_or_null "$url")"
     typ="$(escape_or_null "$typ")"
     year="$(escape_or_null "$year")"
-    uid="$(uuidgen)"
+    uid="$(uuidgen -t)"
 
     sqlite3 "$DB" << SQL
 insert into teas (name, year, amount, type, url, uid)
@@ -53,7 +53,7 @@ SQL
 
 function _drink_tea {
     tea=$1
-    uid="$(uuidgen)"
+    uid="$(uuidgen -t)"
     read -r -p "Amount: " amount
 
     echo "New entry: $uid"
@@ -77,13 +77,50 @@ SQL
 }
 
 function drink_tea_fzy {
-    tea="$(list_teas)"
+    tea="$(list_teas not-done)"
     [ -z "$tea" ] && exit 0
     _drink_tea "$tea"
 }
 
 function list_teas {
-    sqlite3 "$DB" "select name from teas" | $FZ
+    mode="$1"
+    : "${mode:="not-done"}"
+    if [ "$mode" = "all" ]; then
+	sqlite3 "$DB" "select name from teas" | $FZ
+    elif [ "$mode" = "not-done" ]; then
+	sqlite3 "$DB" \
+	"select name from teas
+	 where uid in 
+	    ( select uid from teas
+	      except
+	      select tea_uid from done
+	    )" | $FZ
+    else
+	exit 1
+    fi
+}
+
+function finish_tea {
+    tea="$(list_teas not-done)"
+    tea="$(escape_sqlite "$tea")"
+    [ -z "$tea" ] && exit 0
+    tea_uid=$(sqlite3 "$DB" <<SQL
+	-- a bit redundant with list_teas but what can you do...
+	-- select the uid from amongst the teas named $tea which
+	-- are not yet done
+	select uid from teas
+	where name = '$tea' and uid in 
+	( select uid from teas
+	  except
+	  select tea_uid from done
+	)
+	limit 1
+SQL
+)
+    tea_uid="$(escape_sqlite "$tea_uid")"
+    done_uid="$(uuidgen -t)"
+    done_uid="$(escape_sqlite "$done_uid")"
+    sqlite3 "$DB" "insert into done (tea_uid, done_uid) values ('$tea_uid', '$done_uid')"
 }
 
 function edit_notes {
@@ -115,7 +152,7 @@ function quick_log {
 }
 
 function info_tea {
-	tea="$(list_teas)"
+	tea="$(list_teas all)"
 	tea="$(escape_sqlite "$tea")"
 	[ -z "$tea" ] && exit 0
 	total="$(sqlite3 "$DB" "select sum(amount) from teas where name = '$tea'")"
@@ -187,6 +224,8 @@ function _client_sync_send_ids {
     sqlite3 -readonly -quote "$DB" 'select uid from teas'
     echo remote-have-log
     sqlite3 -readonly -quote "$DB" 'select uid from log'
+    echo remote-have-done
+    sqlite3 -readonly -quote "$DB" 'select done_uid from done'
     echo "done"
 }
 
@@ -194,6 +233,7 @@ function _client_sync_send_missing {
     local state=""
     local tea_ids=""
     local log_ids=""
+    local done_ids=""
     local sql=""
 
     while read -r line; do
@@ -203,6 +243,9 @@ function _client_sync_send_missing {
 	    ;;
 	    server-want-log)
 		state="server-want-log"
+	    ;;
+	    server-want-done)
+		state="server-want-done"
 	    ;;
 	    server-begin-sql)
 		state="server-begin-sql"
@@ -227,6 +270,13 @@ function _client_sync_send_missing {
 			    log_ids="$line,$log_ids"
 			fi
 		    ;;
+		    server-want-done)
+			if [ -z "$done_ids" ]; then
+			    done_ids="$line"
+			else
+			    done_ids="$line,$done_ids"
+			fi
+		    ;;
 		    server-begin-sql)
 			sql="$sql;$line"
 		    ;;
@@ -241,6 +291,8 @@ function _client_sync_send_missing {
 select * from teas where uid in ($tea_ids);
 .mode insert log
 select * from log where uid in ($log_ids);
+.mode insert done
+select * from done where done_uid in ($done_ids);
 SQL
     echo "done"
     
@@ -254,6 +306,7 @@ SQL
 function _server_sync_send_missing {
     local tea_ids=""
     local log_ids=""
+    local done_ids=""
     local state=""
 
     while read -r line; do
@@ -263,6 +316,9 @@ function _server_sync_send_missing {
 	    ;;
 	    remote-have-log)
 		state="remote-have-log"
+	    ;;
+	    remote-have-done)
+		state="remote-have-done"
 	    ;;
 	    done)
 		break
@@ -281,6 +337,13 @@ function _server_sync_send_missing {
 			    log_ids="($line)"
 			else
 			    log_ids="$log_ids,($line)"
+			fi
+		    ;;
+		    remote-have-done)
+			if [ -z "$done_ids" ]; then
+			    done_ids="($line)"
+			else
+			    done_ids="$done_ids,($line)"
 			fi
 		    ;;
 		esac
@@ -328,6 +391,20 @@ SQL
 	    offset 1 -- to drop the 0 uid
 SQL
     fi
+
+    if [ ! -z "$done_ids" ]; then
+	echo server-want-done
+	sqlite3 -readonly -quote "$DB" <<SQL
+	    select done_uid from (
+		select 0 as done_uid
+		union values $done_ids
+	    )
+	    except select done_uid
+	    from done
+	    limit -1
+	    offset 1 -- to drop the 0 uid
+SQL
+    fi
     echo "done"
 }
 
@@ -367,8 +444,8 @@ function sync {
 }
 
 function main {
-    [ -f "$DB" ] || sqlite3 "$DB" << SQL
-create table teas (
+    sqlite3 "$DB" << SQL
+create table if not exists teas (
     name,
     amount,
     url,
@@ -377,12 +454,17 @@ create table teas (
     uid
 );
 
-create table log (
+create table if not exists log (
     tea,
     amount,
     date,
     notes,
     uid
+);
+
+create table if not exists done (
+    tea_uid,
+    done_uid
 );
 SQL
 
@@ -392,11 +474,14 @@ SQL
             new_tea
         ;;
         list)
-            list_teas
+            list_teas all
         ;;
         edit)
             edit_notes "$2"
         ;;
+	finish)
+	    finish_tea
+	;;
         lg)
             quick_log
         ;;
