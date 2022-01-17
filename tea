@@ -443,6 +443,11 @@ function sync {
     | ssh "$1" 'exec $SHELL -l -c "tea _server_sync_accept_missing"'
 }
 
+function print_help {
+    echo "tea [new|list|edit|finish|lg|info|overview|sync|help]"
+    echo Use without any argument to drink a tea
+}
+
 function main {
     sqlite3 "$DB" << SQL
 create table if not exists teas (
@@ -512,9 +517,12 @@ SQL
 	    _server_sync_accept_missing
 	;;
 
-        *)
+        "")
             drink_tea_fzy
         ;;
+	*)
+	    print_help
+	;;
     esac
 }
 
