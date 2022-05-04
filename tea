@@ -424,8 +424,8 @@ SQL
 .mode insert done
 select *
 from done
-where uid in (
-    select uid
+where done_uid in (
+    select done_uid
     from done
     except values $done_ids
 );
