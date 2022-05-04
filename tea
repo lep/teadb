@@ -375,10 +375,29 @@ SQL
 	    limit -1
 	    offset 1 -- to drop the 0 uid
 SQL
+    else # client has no teas at all so we send everything
+	echo server-begin-sql
+	sqlite3 -readonly "$DB" <<SQL
+.mode insert teas
+select *
+from teas;
+SQL
+
     fi
 
 
     if [ ! -z "$log_ids" ]; then
+	echo server-begin-sql
+	sqlite3 -readonly "$DB" <<SQL
+.mode insert log
+select *
+from log
+where uid in (
+    select uid
+    from teas
+    except values $log_ids
+);
+SQL
 	echo server-want-log
 	sqlite3 -readonly -quote "$DB" <<SQL
 	    select uid from (
@@ -390,9 +409,27 @@ SQL
 	    limit -1
 	    offset 1 -- to drop the 0 uid
 SQL
+    else # client doesnt have any logs yet so we send everything we got
+	echo server-begin-sql
+	sqlite3 -readonly "$DB" <<SQL
+.mode insert log
+select *
+from log;
+SQL
     fi
 
     if [ ! -z "$done_ids" ]; then
+	echo server-begin-sql
+	sqlite3 -readonly "$DB" <<SQL
+.mode insert done
+select *
+from done
+where uid in (
+    select uid
+    from done
+    except values $done_ids
+);
+SQL
 	echo server-want-done
 	sqlite3 -readonly -quote "$DB" <<SQL
 	    select done_uid from (
@@ -403,6 +440,13 @@ SQL
 	    from done
 	    limit -1
 	    offset 1 -- to drop the 0 uid
+SQL
+    else # client doesnt have any done teas yet so we send everything we got
+	echo server-begin-sql
+	sqlite3 -readonly "$DB" <<SQL
+.mode insert done
+select *
+from done;
 SQL
     fi
     echo "done"
