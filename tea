@@ -45,8 +45,8 @@ function new_tea {
     uid="$(uuidgen -t)"
 
     sqlite3 "$DB" << SQL
-insert into teas (name, year, amount, type, url, uid)
-values ($name, $year, $amount, $typ, $url, '$uid');
+insert into teas (name, year, amount, type, url, uid, date)
+values ($name, $year, $amount, $typ, $url, '$uid', date('now'));
 SQL
     
 }
@@ -120,7 +120,7 @@ SQL
     tea_uid="$(escape_sqlite "$tea_uid")"
     done_uid="$(uuidgen -t)"
     done_uid="$(escape_sqlite "$done_uid")"
-    sqlite3 "$DB" "insert into done (tea_uid, done_uid) values ('$tea_uid', '$done_uid')"
+    sqlite3 "$DB" "insert into done (tea_uid, done_uid, date) values ('$tea_uid', '$done_uid', date('now'))"
 }
 
 function edit_notes {
@@ -500,7 +500,8 @@ create table if not exists teas (
     url,
     type,
     year,
-    uid
+    uid,
+    date
 );
 
 create table if not exists log (
@@ -513,7 +514,8 @@ create table if not exists log (
 
 create table if not exists done (
     tea_uid,
-    done_uid
+    done_uid,
+    date
 );
 SQL
 
