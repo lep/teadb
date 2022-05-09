@@ -394,7 +394,7 @@ select *
 from log
 where uid in (
     select uid
-    from teas
+    from log
     except values $log_ids
 );
 SQL
